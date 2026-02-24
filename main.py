@@ -102,6 +102,7 @@ def run_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
 # Main program
+
 print("系統準備就緒")
 print("按 's' - 用語音輸入查詢字義")
 print("FastAPI server starting at http://0.0.0.0:8000")

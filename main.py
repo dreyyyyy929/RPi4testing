@@ -7,14 +7,8 @@ from playsound import playsound
 import os
 import datetime as dt
 import json  
-from fastapi import FastAPI
-
-app = FastAPI()
-
-@app.get("/")
-def read_root(name: str = "World"):
-    return {"message": f"Hello {name}"}
-
+from fastapi import FastAPI, Request
+import uvicorn
 
 r = sr.Recognizer()
 mic = sr.Microphone()
@@ -44,13 +38,11 @@ def saveHistory(prompts, response):
     print(f"History saved at {new_entry['timestamp']}")
     
 def explain_text(text):
-
     # Generate response from Ollama
     print("Thinking...")
     response = ollama.chat(model="qwen2.5:1.5b-instruct", messages=[
           {'role': 'system', 
              'content': '用粵語口語在四十字解釋以下詞語。如果有多個詞語，請分別簡短解釋每個詞語和整個句子的意思'},
-
         {'role': 'user',
          'content': f'解釋{text}'}
     ])
@@ -58,7 +50,7 @@ def explain_text(text):
     print(f"Lexi 學習助手: {reply}")
 
     # Save history
-    saveHistory(text,reply)
+    saveHistory(text, reply)
 
     # Text to Speech
     tts = gTTS(text=reply, lang='yue', slow=False)
@@ -69,6 +61,19 @@ def explain_text(text):
     if os.path.exists("output.mp3"):
         os.remove("output.mp3")
 
+app = FastAPI()
+
+@app.post("/explain")
+async def process_camera_input(request: Request):
+    request_data = await request.json()
+    text = request_data["words"][0]["text"]
+    print(f"讀取鏡頭數據：{text}")
+    
+    # Run explain_text in a separate thread to avoid blocking
+    thread = threading.Thread(target=explain_text, args=(text,))
+    thread.start()
+    
+    return {"status": "processing", "text": text}
 
 def process_voice_input():
     try:
@@ -82,28 +87,28 @@ def process_voice_input():
         tts = gTTS(text="唔好意思，Lexi聽唔清楚你的查詢", lang='yue', slow=False)
         tts.save("output.mp3")
         playsound("output.mp3")
-
-def process_camera_input():
-    camera_data = {'words': [{'closest_char': '梅', 'line': 0, 'second_closest': '、', 'text': '海棠形、梅花形等等'}]}
-    text = camera_data['words']['text']
-    print(f"讀取鏡頭數據：{text}")
-    explain_text(text)
-
+    except Exception as e:
+        print(f"Error in voice processing: {e}")
 
 def on_press(key):
     try:
-        if key.char == 's':  
+        if hasattr(key, 'char') and key.char == 's':  
+            print("Voice input triggered...")
             threading.Thread(target=process_voice_input).start()
-        if key.char == 'c':  
-            threading.Thread(target=process_camera_input).start()
-    except:
+    except AttributeError:
         pass
 
+def run_server():
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
+
 # Main program
+
 print("系統準備就緒")
 print("按 's' - 用語音輸入查詢字義")
-print("按 'c' - 讀取鏡頭數據查詢字義")
+print("FastAPI server starting at http://0.0.0.0:8000")
 
-listener = keyboard.Listener(on_press=on_press)
-listener.start()
-listener.join()
+server_thread = threading.Thread(target=run_server, daemon=True)
+server_thread.start()
+
+with keyboard.Listener(on_press=on_press) as listener:
+    listener.join()

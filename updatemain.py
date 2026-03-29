@@ -2,7 +2,7 @@ import threading
 import speech_recognition as sr
 import ollama
 from gtts import gTTS
-from playsound import playsound
+import pygame
 import os
 import datetime as dt
 import json  
@@ -55,9 +55,17 @@ def explain(cam, voice):
     #play explanation
     tts = gTTS(text=reply, lang='yue', slow=False)
     tts.save("output.mp3")
-    playsound("output.mp3")
-    if os.path.exists("output.mp3"):
-        os.remove("output.mp3")
+
+    pygame.mixer.init()
+    pygame.mixer.music.load("output.mp3")
+    pygame.mixer.music.play()
+
+    while pygame.mixer.music.get_busy():
+        pygame.time.wait(100)
+    
+    # playsound("output.mp3")
+    # if os.path.exists("output.mp3"):
+    #     os.remove("output.mp3")
 
 def record_voice():
     global voice_text

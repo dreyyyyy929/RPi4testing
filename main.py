@@ -19,40 +19,47 @@ r = sr.Recognizer()
 mic = sr.Microphone()
 app = FastAPI()
 
-def save_history(prompt, response):
+def saveHistory(prompts, response):
+    new_entry = {
+        "timestamp": dt.datetime.now().isoformat(),
+        "prompt": prompts,
+        "response": response
+    }
+
     history = []
     if os.path.exists('history.txt'):
         try:
             with open('history.txt', 'r', encoding='utf-8') as f:
                 content = f.read().strip()
-                if content:
+                if content:  # If file is not empty
                     history = json.loads(content)
-        except:
+        except (json.JSONDecodeError, FileNotFoundError):
             history = []
     
-    history.append({
-        "timestamp": dt.datetime.now().isoformat(),
-        "prompt": prompt,
-        "response": response
-    })
+    history.append(new_entry)
     
     with open('history.txt', 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+        
+    print(f"History saved at {new_entry['timestamp']}")
 
-def explain(cam, voice):
-    #Ollama
+def explain_text(cam, voice):
     text = f"鏡頭檢測到的詞語: {cam}\n用家語音補充: {voice}\n請根據以上資訊解釋"
+    # Generate response from Ollama
+    print("Thinking...")
     response = ollama.chat(model="qwen2.5:1.5b-instruct", messages=[
-        {'role': 'system', 'content': '用粵語口語在四十字解釋以下詞語。如果有多個詞語，請分別簡短解釋每個詞語和整個句子的意思'},
-        {'role': 'user', 'content': f'解釋{text}'}
+          {'role': 'system', 
+             'content': '用粵語口語在四十字解釋以下詞語。如果有多個詞語，請分別簡短解釋每個詞語和整個句子的意思'},
+        {'role': 'user',
+         'content': f'解釋{text}'}
     ])
     reply = response['message']['content']
-    print(f"Lexi: {reply}")
+    print(f"Lexi 學習助手: {reply}")
 
-    #save history
-    save_history(text, reply)
+    # Save history
+    saveHistory(text, reply)
 
-    #play explanation
+    # Text to Speech
     tts = gTTS(text=reply, lang='yue', slow=False)
     tts.save("output.mp3")
 
@@ -62,36 +69,35 @@ def explain(cam, voice):
 
     while pygame.mixer.music.get_busy():
         pygame.time.wait(100)
-    
-    # playsound("output.mp3")
-    # if os.path.exists("output.mp3"):
-    #     os.remove("output.mp3")
 
-def record_voice():
+    # Delete temp file
+    if os.path.exists("output.mp3"):
+        os.remove("output.mp3")
+
+def process_voice_input():
     global voice_text
     try:
         with mic as source:
-            r.adjust_for_ambient_noise(source, duration=0.5)
-            print("Recording voice...")
-            audio = r.listen(source, timeout=15, phrase_time_limit=20)
+            print("Recording...")
+            audio = r.listen(source, timeout=10, phrase_time_limit=20) 
             voice_text = r.recognize_google(audio, language="yue-Hant-hk")
-        print(f"User: {voice_text}")
+        print(f"用家: {voice_text}")
     except:
         voice_text = None
     finally:
         voice_done.set()
 
 @app.post("/button_press")
-async def button_press(request: Request):
+async def button_press():
     global voice_text
     voice_text = None
     voice_done.clear()
-    threading.Thread(target=record_voice).start()
+    threading.Thread(target=process_voice_input).start()
     button_pressed.set()
     return {"status": "button_pressed"}
 
 @app.post("/camera_data")
-async def receive_camera_data(request: Request):
+async def process_camera_input(request: Request):
     request_data = await request.json()
     cam_data = request_data['words'][-1]['closest_char']
     camera_queue.put(cam_data)
@@ -104,27 +110,29 @@ def process_explanation():
     if voice_text is not None:
         current_voice_text = voice_text 
     else:
-        "鏡頭偵測到嘅字係咩意思"
+        current_voice_text = "鏡頭偵測到嘅字係咩意思"
     
     try:
         cam_data = camera_queue.get(timeout=10)
     except:
         cam_data = "未檢測到詞語"
     
-    explain(cam_data, current_voice_text)
-
-def main_workflow():
-    print("Server starting at http://0.0.0.0:8000")
+    explain_text(cam_data, current_voice_text)
     
-    while True:
-        button_pressed.wait()
-        button_pressed.clear()
-        threading.Thread(target=process_explanation).start()
 
 def run_server():
     uvicorn.run(app, host="0.0.0.0", port=8000, log_level="info")
 
+# Main program
+
+print("系統準備就緒")
+print("按 's' - 用語音輸入查詢字義")
+print("FastAPI server starting at http://0.0.0.0:8000")
+
 server_thread = threading.Thread(target=run_server, daemon=True)
 server_thread.start()
 
-main_workflow()
+while True:
+    button_pressed.wait()
+    button_pressed.clear()
+    threading.Thread(target=process_explanation).start()
